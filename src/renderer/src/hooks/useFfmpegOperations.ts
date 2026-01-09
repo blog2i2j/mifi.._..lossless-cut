@@ -15,10 +15,10 @@ import type { AvoidNegativeTs, Html5ifyMode, PreserveMetadata } from '../../../c
 import type { AllFilesMeta, Chapter, CopyfileStreams, CustomTagsByFile, LiteFFprobeStream, ParamsByStreamId, SegmentToExport } from '../types';
 import type { LossyMode } from '../../../main';
 import { UserFacingError } from '../../errors';
+import mainApi from '../mainApi';
 
 const { join, resolve, dirname } = window.require('path');
 const { writeFile, mkdir, access, constants: { W_OK } } = window.require('fs/promises');
-const { pathExists } = window.require('@electron/remote').require('./index.js');
 
 
 export class OutputNotWritableError extends Error {
@@ -94,7 +94,7 @@ function useFfmpegOperations({ filePath, treatInputFileModifiedTimeAsStart, trea
   appendFfmpegCommandLog: (args: string[]) => void,
 }) {
   const shouldSkipExistingFile = useCallback(async (path: string) => {
-    const fileExists = await pathExists(path);
+    const fileExists = await mainApi.pathExists(path);
 
     // If output file exists, check that it is writable, so we can inform user if it's not (or else ffmpeg will fail with "Permission denied")
     // this seems to sometimes happen on Windows, not sure why.
@@ -217,11 +217,11 @@ function useFfmpegOperations({ filePath, treatInputFileModifiedTimeAsStart, trea
       // https://superuser.com/questions/787064/filename-quoting-in-ffmpeg-concat
       // Must add "file:" or we get "Impossible to open 'pipe:xyz.mp4'" on newer ffmpeg versions
       // https://superuser.com/questions/718027/ffmpeg-concat-doesnt-work-with-absolute-path
-      const concatTxt = paths.map((file) => `file 'file:${resolve(file).replaceAll('\'', "'\\''")}'`).join('\n');
+      const concatTxt = paths.map((file) => `file 'file:${resolve(file).replaceAll('\'', String.raw`'\''`)}'`).join('\n');
 
       const ffmpegCommandLine = getFfCommandLine('ffmpeg', ffmpegArgs);
 
-      const fullCommandLine = `echo -e "${concatTxt.replace(/\n/, '\\n')}" | ${ffmpegCommandLine}`;
+      const fullCommandLine = `echo -e "${concatTxt.replace(/\n/, String.raw`\n`)}" | ${ffmpegCommandLine}`;
       console.log(fullCommandLine);
       appendLastCommandsLog(fullCommandLine);
 
@@ -917,7 +917,7 @@ function useFfmpegOperations({ filePath, treatInputFileModifiedTimeAsStart, trea
     let streamArgs: string[] = [];
     const outPaths = await pMap(outStreams, async ({ index, codec, type, format: { format, ext } }) => {
       const outPath = getSuffixedOutPath({ customOutDir, filePath, nameSuffix: `stream-${index}-${type}-${codec}.${ext}` });
-      if (!enableOverwriteOutput && await pathExists(outPath)) throw new RefuseOverwriteError();
+      if (!enableOverwriteOutput && await mainApi.pathExists(outPath)) throw new RefuseOverwriteError();
 
       streamArgs = [
         ...streamArgs,
@@ -953,7 +953,7 @@ function useFfmpegOperations({ filePath, treatInputFileModifiedTimeAsStart, trea
       const ext = codec || 'bin';
       const outPath = getSuffixedOutPath({ customOutDir, filePath, nameSuffix: `stream-${index}-${type}-${codec}.${ext}` });
       invariant(outPath != null);
-      if (!enableOverwriteOutput && await pathExists(outPath)) throw new RefuseOverwriteError();
+      if (!enableOverwriteOutput && await mainApi.pathExists(outPath)) throw new RefuseOverwriteError();
 
       streamArgs = [
         ...streamArgs,

@@ -2,7 +2,7 @@ import type { CSSProperties, ReactEventHandler, FocusEventHandler, DragEventHand
 import { memo, useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { FaAngleLeft, FaRegTimesCircle } from 'react-icons/fa';
 import { MdRotate90DegreesCcw } from 'react-icons/md';
-import { AnimatePresence, MotionConfig } from 'framer-motion';
+import { AnimatePresence, MotionConfig } from 'motion/react';
 import i18n from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { produce } from 'immer';
@@ -111,12 +111,13 @@ import useErrorHandling from './hooks/useErrorHandling';
 import GenericDialog, { useDialog } from './components/GenericDialog';
 import useHtml5ify from './hooks/useHtml5ify';
 import WhatsNew from './components/WhatsNew';
+import mainApi from './mainApi.js';
 
 const electron = window.require('electron');
 const { lstat } = window.require('fs/promises');
 const { parse: parsePath, join: pathJoin, basename, dirname } = window.require('path');
 
-const { focusWindow, hasDisabledNetworking, quitApp, pathToFileURL, setProgressBar, sendOsNotification, lossyMode, pathExists } = window.require('@electron/remote').require('./index.js');
+const { hasDisabledNetworking, pathToFileURL, lossyMode } = window.require('@electron/remote').require('./index.js');
 
 
 const hevcPlaybackSupportedPromise = doesPlayerSupportHevcPlayback();
@@ -200,7 +201,9 @@ function App() {
 
   useEffect(() => setDocumentTitle({ filePath, working: working?.text, progress }), [progress, filePath, working?.text]);
 
-  useEffect(() => setProgressBar(progress ?? -1), [progress]);
+  useEffect(() => {
+    mainApi.setProgressBar(progress ?? -1);
+  }, [progress]);
 
   useEffect(() => {
     ffmpegSetCustomFfPath(customFfPath);
@@ -248,7 +251,7 @@ function App() {
 
   const showOsNotification = useCallback((text: string) => {
     if (hideOsNotifications == null) {
-      sendOsNotification({ title: text });
+      mainApi.sendOsNotification({ title: text });
     }
   }, [hideOsNotifications]);
 
@@ -724,7 +727,7 @@ function App() {
           const firstSelectedSegment = selectedSegmentsWithoutMarkers[0];
           if (firstSelectedSegment != null) {
             const index = cutSegments.findIndex((segment) => segment.segId === firstSelectedSegment.segId);
-            if (index >= 0) setCurrentSegIndex(index);
+            if (index !== -1) setCurrentSegIndex(index);
             seekAbs(firstSelectedSegment.start);
           }
         } else if (currentCutSeg != null) {
@@ -759,7 +762,7 @@ function App() {
           const selectedSegmentsWithoutMarkers = filterNonMarkers(selectedSegments);
 
           const index = selectedSegmentsWithoutMarkers.findIndex((selectedSegment) => selectedSegment.segId === playingSegment.segId);
-          let newSelectedSegmentIndex = getNewJumpIndex(index >= 0 ? index : 0, 1);
+          let newSelectedSegmentIndex = getNewJumpIndex(index !== -1 ? index : 0, 1);
           if (newSelectedSegmentIndex > selectedSegmentsWithoutMarkers.length - 1) {
             // have reached end of last segment
             if (playbackModeRef.current === 'loop-selected-segments') newSelectedSegmentIndex = 0; // start over
@@ -800,7 +803,7 @@ function App() {
   const batchListRemoveFile = useCallback((path: string | undefined) => {
     setBatchFiles((existingBatch) => {
       const index = existingBatch.findIndex((existingFile) => existingFile.path === path);
-      if (index < 0) return existingBatch;
+      if (index === -1) return existingBatch;
       const newBatch = [...existingBatch];
       newBatch.splice(index, 1);
       const newItemAtIndex = newBatch[index];
@@ -1339,7 +1342,7 @@ function App() {
 
   const loadMedia = useCallback(async ({ filePath: fp, projectPath }: { filePath: string, projectPath?: string | undefined }) => {
     async function tryOpenProjectPath(path: string) {
-      if (!(await pathExists(path))) return false;
+      if (!(await mainApi.pathExists(path))) return false;
       await loadEdlFile({ path, type: 'llc' });
       return true;
     }
@@ -1355,7 +1358,7 @@ function App() {
         const sameDirEdlFilePath = getEdlFilePath(fp);
         // MAS only allows fs.access (pathExists) if we don't have access to input dir yet, so check first if the file exists,
         // so we don't need to annoy the user by asking for permission if the project file doesn't exist
-        if (await pathExists(sameDirEdlFilePath)) {
+        if (await mainApi.pathExists(sameDirEdlFilePath)) {
           // Ok, the file exists. now we have to ask the user, because we need to read that file
           await ensureAccessToSourceDir(fp);
           // Ok, we got access from the user (or already have access), now read the project file
@@ -1523,7 +1526,7 @@ function App() {
       const mediaFilePath = pathJoin(dirname(path), mediaFileName);
 
       // Note: MAS only allows fs.stat (pathExists) if we don't have access to input dir yet
-      if (!(await pathExists(mediaFilePath))) {
+      if (!(await mainApi.pathExists(mediaFilePath))) {
         errorToast(i18n.t('The media file referenced by the project file you tried to open does not exist in the same directory as the project file: {{mediaFileName}}', { mediaFileName }));
         return;
       }
@@ -2063,7 +2066,7 @@ function App() {
       toggleMuted,
       copySegmentsToClipboard,
       reloadFile: () => setCacheBuster((v) => v + 1),
-      quit: () => quitApp(),
+      quit: () => mainApi.quitApp(),
       closeCurrentFile: () => { closeFileWithConfirm(); },
       exportYouTube,
       showStreamsSelector: handleShowStreamsSelectorClick,
@@ -2314,7 +2317,7 @@ function App() {
     if (!ev.dataTransfer) return;
     await withErrorHandling(async () => {
       const filePaths = [...ev.dataTransfer.files].map((f) => electron.webUtils.getPathForFile(f));
-      focusWindow();
+      await mainApi.focusWindow();
       batchLoadPaths(filePaths, true);
     });
   }, [batchLoadPaths, withErrorHandling]);
@@ -2325,7 +2328,7 @@ function App() {
     await withErrorHandling(async () => {
       const filePaths = [...ev.dataTransfer.files].map((f) => electron.webUtils.getPathForFile(f));
       if (filePaths.length !== 1) return;
-      focusWindow();
+      await mainApi.focusWindow();
       addStreamSourceFile(filePaths[0]!);
     });
   }, [addStreamSourceFile, withErrorHandling]);
@@ -2335,7 +2338,7 @@ function App() {
       ev.preventDefault();
       if (!ev.dataTransfer) return;
       const filePaths = [...ev.dataTransfer.files].map((f) => electron.webUtils.getPathForFile(f));
-      focusWindow();
+      await mainApi.focusWindow();
       userOpenFiles(filePaths);
     }
     const element = videoContainerRef.current;
